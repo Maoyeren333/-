@@ -1,0 +1,26 @@
+# 推理服务依赖（Python 3.14，已在本机 .venv 中验证通过）
+# 安装：python -m pip install -r requirements.txt
+# 国内网络建议加镜像：-i https://pypi.tuna.tsinghua.edu.cn/simple
+
+# --- Web 服务 ---
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.13.4
+
+# --- 影像读写 ---
+numpy==2.5.2
+pillow==12.3.0
+rasterio==1.5.1
+
+# --- 三个算法的真实推理 ---
+# C2FNet(伪装目标检测)：torch 即可；Res2Net 骨干权重按需联网下载
+# STFF-GA(变化检测)：torch 即可，自己实现的 resnet18 骨干
+# ST-UNet(语义分割)：需要 timm（Swin/DropPath 组件）、ml-collections（配置）、scipy（vit_seg_modeling 使用 ndimage）
+torch==2.14.1
+scipy==1.18.1
+timm==1.0.30
+ml-collections==1.1.0
+
+# --- 可选 ---
+# torchvision 仅在官方训练/测试脚本（MyTrain.py / MyTest.py / test.py）里用到，
+# 线上推理路径不依赖它，按需安装：torchvision==0.29.1

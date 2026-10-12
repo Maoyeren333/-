@@ -1,0 +1,28 @@
+# 依赖与构建产物
+node_modules/
+.venv/
+target/
+dist/
+__pycache__/
+*.pyc
+
+# 运行期数据：上传的影像、解译掩膜、日志
+data/
+results/
+*.log
+
+# 模型权重不进仓库（体积远超 GitHub 单文件 100 MB 限制），
+# 走 Release / ModelScope / 对象存储 + scripts/download_weights.sh 下载，
+# 约定见 python-inference/weights/README.md
+python-inference/weights/*
+!python-inference/weights/README.md
+!python-inference/weights/manifest.json
+
+# 编辑器与系统文件
+.DS_Store
+.idea/
+.vscode/
+
+# 本机私有配置（含数据库密码），不进仓库
+**/application-local.yml
+**/application-local.yaml

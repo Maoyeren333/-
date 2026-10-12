@@ -1,0 +1,1 @@
+USE uav_remote_sensing; CREATE TABLE remote_image(id BIGINT PRIMARY KEY AUTO_INCREMENT,task_id BIGINT NOT NULL,file_name VARCHAR(255),file_path VARCHAR(500),file_size BIGINT,created_at DATETIME,CONSTRAINT fk_image_task FOREIGN KEY(task_id) REFERENCES uav_task(id));

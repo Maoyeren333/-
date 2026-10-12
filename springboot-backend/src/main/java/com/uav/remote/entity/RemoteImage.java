@@ -1,0 +1,1 @@
+package com.uav.remote.entity;import jakarta.persistence.*;import lombok.*;import java.time.*;@Entity @Data @NoArgsConstructor public class RemoteImage{@Id @GeneratedValue(strategy=GenerationType.IDENTITY)private Long id;private Long taskId;private String fileName;private String filePath;private Long fileSize;private LocalDateTime createdAt=LocalDateTime.now();}

@@ -1,0 +1,17 @@
+# 统一换行符，避免跨平台协作时整文件 diff
+* text=auto eol=lf
+
+# 二进制文件不要做行尾转换
+*.png binary
+*.jpg binary
+*.tif binary
+*.tiff binary
+*.pth binary
+*.zip binary
+
+# 如果确实要把权重提交进仓库，需要启用 Git LFS（免费额度 1 GB 存储 + 1 GB/月流量，
+# 超出会收费，且 clone 端必须装 git-lfs）。启用方式：
+#   git lfs install
+#   git lfs track "*.pth"
+# 然后把下面注释打开
+# *.pth filter=lfs diff=lfs merge=lfs -text
