@@ -79,6 +79,87 @@ git push -u origin main
 - 想自动化训练，用 `.github/workflows/train-weights.yml` 配一台带 GPU 的 self-hosted runner
   （GitHub 托管 runner 没有 GPU）。
 
+## 搭档上手与代码同步
+
+### 环境要求
+
+| 依赖 | 版本 | 用途 |
+| --- | --- | --- |
+| Node | 22.x | 前端构建 |
+| JDK | 17 | 后端 |
+| Maven | 3.9+ | 后端依赖与运行 |
+| Python | 3.12–3.14（本机验证 3.14） | 推理服务 |
+| MySQL | 8.0 | 任务与成果元数据 |
+
+国内网络安装 Python 依赖建议加镜像：`-i https://pypi.tuna.tsinghua.edu.cn/simple`。
+
+### 四步跑起来
+
+```bash
+# 1) 克隆（仓库名是 -，必须显式指定目录名，否则会得到一个叫 - 的文件夹）
+git clone git@github.com:Maoyeren333/-.git remote-sensing-platform
+cd remote-sensing-platform
+
+# 2) 前端依赖
+cd vue-frontend && npm install && cd ..
+
+# 3) Python 环境
+cd python-inference
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+cd ..
+
+# 4) 数据库：三个脚本按顺序执行（顺序不能错，remote_image 有指向 uav_task 的外键）
+mysql -uroot -p < springboot-backend/src/main/resources/db/schema.sql
+mysql -uroot -p < springboot-backend/src/main/resources/db/schema_extra.sql
+mysql -uroot -p < springboot-backend/src/main/resources/db/schema_auth.sql
+
+# 5) 本机私有配置（数据库密码不进仓库，也可改用 DB_PASSWORD 环境变量）
+cat > springboot-backend/src/main/resources/application-local.yml <<'YAML'
+spring:
+  datasource:
+    password: '你的 MySQL 密码'
+YAML
+```
+
+### 启动（三个终端）
+
+```bash
+cd python-inference   && .venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
+cd springboot-backend && mvn spring-boot:run      # 默认 8080
+cd vue-frontend       && npm run dev              # 默认 5173，端口被占会自动换到 5174
+```
+
+浏览器打开终端提示的地址，先注册账号再登录。
+
+### 拉取更新时注意两件事
+
+1. **权重不跟着 git 走**。`git pull` 只会更新 `weights/manifest.json`，权重文件本身要手动拉：
+
+   ```bash
+   cd python-inference && ./scripts/download_weights.sh
+   ```
+
+2. **数据库结构变更要手动迁移**。若 `git pull` 后后端报 schema 校验失败（`ddl-auto: validate`），说明有新迁移脚本要执行：
+
+   ```bash
+   mysql -uroot -p uav_remote_sensing < springboot-backend/src/main/resources/db/schema_geolocation.sql
+   ```
+
+### 协作约定
+
+- 改之前先 `git pull`，改完尽快 `push`；多人同时改建议各开分支、用 Pull Request 合并。
+- 想各用各的数据库互不干扰，启动后端时加 `DB_NAME`：
+  `DB_NAME=uav_remote_sensing_你的名字 mvn spring-boot:run`（新库要先按上面第 4 步建表）。
+- 提交信息里只要涉及 `src/main/resources/db/` 的改动，请注明「需执行 xxx.sql」，
+  否则搭档 `pull` 后后端会直接启动失败。
+
+### 当前状态：模型尚未加载权重
+
+仓库内**不含训练权重**（体积与授权原因）。默认以随机初始化权重推理，只用于验证链路，结果不具备判读意义：
+解译返回 `weights_loaded: false`，「智能解译」页显示 `NO WEIGHTS`，通知中心也会提示。
+权重的获取/训练/发布流程见 [TRAINING.md](TRAINING.md)。
+
 ## 配置
 
 `springboot-backend/src/main/resources/application.yml`：
