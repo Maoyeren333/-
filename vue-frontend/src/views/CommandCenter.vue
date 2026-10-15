@@ -4,7 +4,7 @@ import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { commandApi } from '../api/http'
 
-const workflows = [{ icon: '＋', title: '创建航拍任务', description: '设置区域、算法和作业计划', to: '/tasks' }, { icon: '⇧', title: '导入遥感影像', description: '上传 TIFF / GeoTIFF / JPG / PNG', to: '/images' }, { icon: '◎', title: '查看实时态势', description: '天气、风险和环境质量', to: '/monitoring' }, { icon: '▦', title: '选择解译算法', description: '配置三种 AI 推理引擎', to: '/algorithms' }]
+const workflows = [{ icon: '＋', title: '创建航拍任务', description: '设置区域、算法和作业计划', to: '/tasks' }, { icon: '⇧', title: '导入遥感影像', description: '上传 TIFF / GeoTIFF / JPG / PNG', to: '/images' }, { icon: '◎', title: '查看实时态势', description: '天气、风险和环境质量', to: '/monitoring' }, { icon: '▦', title: '选择解译算法', description: '查看 C2FNet 模型状态', to: '/algorithms' }]
 const tips = ref([])
 
 const services = ref([])

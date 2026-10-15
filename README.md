@@ -1,201 +1,107 @@
-# 无人机遥感智能解译平台
+# C2FNet 伪装目标检测平台
 
-`vue-frontend`：Vue3/Element Plus/ECharts；`springboot-backend`：Spring Boot + MySQL + OpenFeign 调度；`python-inference`：FastAPI 推理服务。MySQL 只保存任务、影像、结果元数据和路径，影像及 tif 保存在磁盘。
+这是两人协作的影像检测平台：Vue 前端负责上传与预览，Spring Boot 管理账户、任务和结果，FastAPI 调用已验证的 C2FNet 模型。当前只提供伪装目标检测。
 
-执行 `springboot-backend/src/main/resources/db/schema.sql`、`schema_extra.sql` 和 `schema_auth.sql` 初始化数据库；启动 Python 服务 `uvicorn main:app --host 0.0.0.0 --port 8000`；启动 Spring Boot 默认 8080；前端 Vite 已配置 `/api` 代理。账户模块提供注册、登录、退出、个人资料和密码修改，使用 BCrypt 加密密码及服务端 Session。
+## 模型与输出
 
-## 解译算法：已接入真实深度模型
+- 模型：C2FNet，Res2Net50 骨干，输入缩放为 352×352；无需标注图即可预测。
+- 使用完整 C2FNet-39.pth 权重，严格检查参数，缺失或不匹配时解译失败。
+- 与本地实验一致：RGB / ImageNet 归一化 → 模型 → 将 logits 恢复到原图尺寸 → sigmoid → 逐图最小最大归一化 → uint8 灰度图。
+- 输出为原尺寸 TIFF 和 PNG 灰度响应图；不是二值掩膜，也不是经过校准的概率。
+- 每次解译生成独立文件，重复运行不会覆盖已有成果。
+- JPG/PNG 支持常规 RGB 图片；TIFF 支持 uint8 单通道、RGB、RGBA，保留已有地理参考。其他位深或多光谱数据需先明确转换方式。
+- CAMO 上的验证不能直接说明真实航拍场景效果；无人机实时遥测和模型训练不在本仓库中。
 
-三个 `detector.py` 已从仿真实现替换为官方网络结构的真实推理，论文与官方源码来自 `Downloads/遥感平台`：
+## 环境
 
-| 算法 | 模型 | 输入 | 输出 |
-| --- | --- | --- | --- |
-| `camouflaged_object_detection` | C2FNet（Res2Net50，IJCAI 2021） | 单幅影像 352×352 | 二值前景掩膜 |
-| `change_detection` | STFF-GA（ResNet18，TGRS 2024） | 双时相影像 256×256 | 二值变化掩膜 |
-| `semantic_segmentation` | ST-UNet（R50-ViT-B/16，TGRS 2022） | 单幅影像 256×256 | 0–5 类别掩膜 |
+建议 Python 3.13、Node.js 22、JDK 17 或 21、Maven 3.9、MySQL 8。以下为 Windows PowerShell 操作，每段均注明所在目录。
 
-- 权重文件放在 `python-inference/weights/`，详见该目录 `README.md`；未放置权重时使用随机初始化权重跑通链路，返回体 `weights_loaded=false` 且 `notes` 说明原因。
-- torch 不可用或模型构建失败时自动降级为仿真实现，返回体 `simulated=true`，平台流程不会中断。
-- 结果统一写出 `*_mask.tif`（GeoTIFF 输入会保留坐标系与仿射变换）与 `*_mask.png` 预览图。
-
-## 接口
-
-推理服务：
-
-- `POST /inference/{algorithm}`：`{ "image_path": "...", "image_path_b": "..." }` → `mask_path`、`preview_path`、`weights_loaded`、`simulated` 等；`image_path_b` 仅变化检测需要。
-- `GET /health`、`GET /algorithms`：运行时状态与各算法权重是否就绪。
-
-后端（Spring Boot）：
-
-- 鉴权：除 `/api/auth/login`、`/api/auth/register` 外，`/api/**` 全部要求登录会话，未登录返回 `401 {"code":401,"message":"登录状态已失效，请重新登录"}`。
-- `POST /api/tasks/{id}/interpretations`：启动解译。未传 `image_path` 时自动使用该任务已上传的影像；变化检测按上传顺序取前两张作为双时相输入，缺第二张时返回明确错误。
-- `GET /api/tasks?keyword=&status=`：任务列表（支持关键字与状态筛选）；`GET /api/tasks/page?page=&size=&keyword=&status=` 分页版。
-- `GET /api/tasks/{id}/detail`：任务详情（任务 + 影像 + 该任务的解译记录）。
-- `DELETE /api/tasks/{id}`：删除任务，级联删除其影像、解译记录与磁盘文件。
-- `GET /api/tasks/{taskId}/images`、`DELETE /api/tasks/{taskId}/images/{imageId}`：影像列表与删除（含磁盘文件）。
-- `GET /api/interpretations?taskId=&status=&algorithm=`：解译记录列表与筛选；`GET /api/interpretations/page` 分页版；`DELETE /api/interpretations/{id}` 删除记录并清理结果文件。
-- `GET /api/notifications`：通知中心数据，由推理服务可达性、权重就绪情况、失败/成功解译、待解译任务、缺影像任务实时合成。
-- `GET /api/interpretations/{id}/preview`、`/mask`：结果预览 PNG 与 GeoTIFF 成果下载。
-- `GET /api/exports`：可导出成果清单（含文件是否存在、大小）；`GET /api/exports/{id}/package` 单条打包 ZIP；`GET /api/exports/package` 全部打包 ZIP。ZIP 内含 `result.tif`、`preview.png`、`metadata.json`。
-- `GET /api/dashboard/summary|trend|algorithms`：任务统计、最近 7 日真实趋势、各算法真实调用与成功数。
-- `GET /api/command/overview`：指挥中心数据——真实服务状态（含 Python 推理服务健康检查、MySQL 查询计时、Open-Meteo 可达性，带超时）、真实统计与最近活动。
-- `GET /api/algorithms`、`/api/algorithms/health`：把推理服务真实状态透传给前端。
-
-前端：驾驶舱图表与指标、指挥中心状态/活动/工作建议、通知中心与角标、全局搜索（含真实任务）、任务统计卡与分页与坐标列、影像列表、结果筛选与分页与删除、任务详情抽屉、成果清单与 ZIP 下载，全部取自上述真实接口。
-
-## 放到 GitHub 与权重接入
-
-### 仓库里放什么、不放什么
-
-- 进仓库：三端源码、三个算法的网络定义、接入约定与 CI 配置。
-- 不进仓库：模型权重、上传的影像与解译成果、官方数据集与论文（体积大且各有独立授权）——这些已在 `.gitignore` 里排除。
-
-### 首次推送
-
-```bash
-cd /Users/maoyeren/xiangmu/遥感平台
-git init -b main
-git add .
-git commit -m "feat: 无人机遥感智能解译平台"
-git remote add origin https://github.com/<用户名>/<仓库>.git
-
-# 本机直连 GitHub 超时，实测需走本机代理（端口以你本地客户端实际监听为准）
-git config http.proxy http://127.0.0.1:7892
-git push -u origin main
-```
-
-代理只配在当前仓库（`git config` 不带 `--global`），不影响其他项目；不想额外配置时，
-也可以改用 Gitee / 阿里云 Codeup（这台机器实测直连可达）。
-
-### 训练好的权重怎么接上去、怎么实时更新
-
-完整流程见 [TRAINING.md](TRAINING.md)，要点：
-
-- 权重按约定文件名放进 `python-inference/weights/`（`c2fnet.pth` / `stff_ga.pth` / `st_unet.pth`）；
-- 权重**不提交仓库**（GitHub 单文件 100 MB 限制、LFS 免费额度只有 1 GB），改走
-  GitHub Release 附件 + `weights/manifest.json` + `scripts/download_weights.sh` 下载并校验 sha256；
-- 替换权重文件后服务会通过文件签名变化**自动热加载**，无需重启；返回体带 `weights_version`
-  （sha256 前 8 位）可追溯结果出自哪一版权重，也可 `POST /models/reload` 立即生效；
-- 想自动化训练，用 `.github/workflows/train-weights.yml` 配一台带 GPU 的 self-hosted runner
-  （GitHub 托管 runner 没有 GPU）。
-
-## 搭档上手与代码同步
-
-### 环境要求
-
-| 依赖 | 版本 | 用途 |
-| --- | --- | --- |
-| Node | 22.x | 前端构建 |
-| JDK | 17 | 后端 |
-| Maven | 3.9+ | 后端依赖与运行 |
-| Python | 3.12–3.14（本机验证 3.14） | 推理服务 |
-| MySQL | 8.0 | 任务与成果元数据 |
-
-国内网络安装 Python 依赖建议加镜像：`-i https://pypi.tuna.tsinghua.edu.cn/simple`。
-
-### 四步跑起来
-
-```bash
-# 1) 克隆（仓库名是 -，必须显式指定目录名，否则会得到一个叫 - 的文件夹）
-git clone git@github.com:Maoyeren333/-.git remote-sensing-platform
+```powershell
+git clone https://github.com/Maoyeren333/-.git remote-sensing-platform
 cd remote-sensing-platform
+```
 
-# 2) 前端依赖
-cd vue-frontend && npm install && cd ..
+### 1. 推理服务
 
-# 3) Python 环境
+在仓库根目录：
+
+```powershell
 cd python-inference
-python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
-cd ..
-
-# 4) 数据库：三个脚本按顺序执行（顺序不能错，remote_image 有指向 uav_task 的外键）
-mysql -uroot -p < springboot-backend/src/main/resources/db/schema.sql
-mysql -uroot -p < springboot-backend/src/main/resources/db/schema_extra.sql
-mysql -uroot -p < springboot-backend/src/main/resources/db/schema_auth.sql
-
-# 5) 本机私有配置（数据库密码不进仓库，也可改用 DB_PASSWORD 环境变量）
-cat > springboot-backend/src/main/resources/application-local.yml <<'YAML'
-spring:
-  datasource:
-    password: '你的 MySQL 密码'
-YAML
+py -3.13 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe scripts/download_weights.py --source "C:\study\semesterwork\遥感平台\camouflaged_object_detection\code\C2FNet-master\checkpoints\C2FNet40\C2FNet-39.pth"
+.\.venv\Scripts\python.exe scripts/download_weights.py --check
+.\.venv\Scripts\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000
 ```
 
-### 启动（三个终端）
+导入路径换成自己保存完整权重的位置。权重不随 git clone/pull 下载，当前也没有公开下载链接。无需重训或复制整个模型数据集。
 
-```bash
-cd python-inference   && .venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
-cd springboot-backend && mvn spring-boot:run      # 默认 8080
-cd vue-frontend       && npm run dev              # 默认 5173，端口被占会自动换到 5174
+Linux/macOS 使用 python3 创建环境，随后将 .venv\\Scripts\\python.exe 换成 .venv/bin/python。若使用已有 Python 环境，请先确认 requirements.txt 中的依赖可用。
+
+### 2. 数据库和后端
+
+在 MySQL 客户端中依次执行：
+
+1. springboot-backend/src/main/resources/db/schema.sql
+2. springboot-backend/src/main/resources/db/schema_extra.sql
+3. springboot-backend/src/main/resources/db/schema_auth.sql
+
+上述初始化脚本面向新数据库。已有数据库不要重复执行建表；缺少经纬度列时才执行 schema_geolocation.sql。此次模型接入没有数据库结构变更，也不会删除历史任务或结果。
+
+另开终端，在仓库根目录：
+
+```powershell
+cd springboot-backend
+$env:DB_USERNAME = "root"
+$env:DB_PASSWORD = "你的数据库密码"
+mvn spring-boot:run
 ```
 
-浏览器打开终端提示的地址，先注册账号再登录。
+默认数据库名 uav_remote_sensing，服务端口 8080。可用 DB_HOST、DB_PORT、DB_NAME、INFERENCE_URL 覆盖配置。首次启动若报告表结构不一致，先核对数据库脚本。
 
-### 拉取更新时注意两件事
+### 3. 前端
 
-1. **权重不跟着 git 走**。`git pull` 只会更新 `weights/manifest.json`，权重文件本身要手动拉：
+另开终端，在仓库根目录：
 
-   ```bash
-   cd python-inference && ./scripts/download_weights.sh
-   ```
+```powershell
+cd vue-frontend
+npm ci
+npm run dev
+```
 
-2. **数据库结构变更要手动迁移**。若 `git pull` 后后端报 schema 校验失败（`ddl-auto: validate`），说明有新迁移脚本要执行：
+打开终端显示的本地地址，注册并登录 → 新建 C2FNet 任务 → 上传图片 → 启动解译 → 结果中心预览 → 下载成果。
 
-   ```bash
-   mysql -uroot -p uav_remote_sensing < springboot-backend/src/main/resources/db/schema_geolocation.sql
-   ```
+一个任务可保存多张影像，当前任务页默认解译上传顺序的第一张；需要分别解译时为每张图片建立独立任务。历史的其他算法任务可以查看，但不能再启动；请新建 C2FNet 任务。
 
-### 协作约定
+## 服务约定
 
-- 改之前先 `git pull`，改完尽快 `push`；多人同时改建议各开分支、用 Pull Request 合并。
-- 想各用各的数据库互不干扰，启动后端时加 `DB_NAME`：
-  `DB_NAME=uav_remote_sensing_你的名字 mvn spring-boot:run`（新库要先按上面第 4 步建表）。
-- 提交信息里只要涉及 `src/main/resources/db/` 的改动，请注明「需执行 xxx.sql」，
-  否则搭档 `pull` 后后端会直接启动失败。
+默认三个服务运行在同一台电脑，后端与 Python 必须能访问同一份绝对文件路径。拆分到多机时需要共享存储及一致的路径映射，不能直接沿用单机配置。
 
-### 当前状态：模型尚未加载权重
+- POST /inference/camouflaged_object_detection：请求体为 {"image_path":"绝对图片路径"}。
+- GET /algorithms：只有 C2FNet；就绪状态来自实际模型加载结果。
+- GET /health：UP 表示模型可加载，DEGRADED 表示服务存活但模型不可用。
+- POST /models/reload：清除模型缓存，下次检查或推理时重新加载。
+- 推理返回 mask_path、preview_path、weights_sha256、weights_loaded、simulated、output_type 等字段。
+- 缺图片/不支持的 TIFF 返回 400；模型或设备不可用返回 503；写文件失败返回 500。
+- 后端仅把 weights_loaded=true 且 simulated=false 的返回作为成功成果。
+- 结果中心与 ZIP 导出保持原有接口。普通图片输出 TIFF；只有具有地理参考的输入才输出带地理参考的 GeoTIFF。
 
-仓库内**不含训练权重**（体积与授权原因）。默认以随机初始化权重推理，只用于验证链路，结果不具备判读意义：
-解译返回 `weights_loaded: false`，「智能解译」页显示 `NO WEIGHTS`，通知中心也会提示。
-权重的获取/训练/发布流程见 [TRAINING.md](TRAINING.md)。
+推理服务读取本机路径，默认只监听 127.0.0.1，通过已登录的后端调用。不要直接暴露为公网文件访问接口。
 
-## 配置
+## 检查与协作
 
-`springboot-backend/src/main/resources/application.yml`：
+```powershell
+# python-inference 目录，测试依赖：
+.\.venv\Scripts\python.exe -m pip install -r requirements-test.txt
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
 
-- `inference.url`：推理服务地址，默认 `http://localhost:8000`。
-- `storage.images-dir`：原始影像落盘目录，默认 `./data/images`（按进程工作目录解析为绝对路径）。
+# vue-frontend 目录：
+npm run build
 
-数据库迁移：`uav_task` 已增加 `latitude` / `longitude` 两列用于监测态势图真实定位，迁移脚本为
-`springboot-backend/src/main/resources/db/schema_geolocation.sql`（已应用到本机库，`schema.sql` 也已同步，全新初始化无需单独执行）。
+# springboot-backend 目录：
+mvn test
+```
 
-推理服务支持的环境变量见 `python-inference/README.md`（`RS_WEIGHTS_DIR`、`RS_DEVICE`、`RS_RESULT_DIR`、`RS_ALLOW_DOWNLOAD`）。
+真实权重测试需设置 C2FNET_TEST_WEIGHTS 指向完整 checkpoint，详见 [推理说明](python-inference/README.md)。[协作说明](CONTRIBUTING.md) 介绍分支和同步；[权重说明](python-inference/weights/README.md) 介绍导入与校验。本地修改只有提交并推送后才会出现在 GitHub。
 
-## 已修复的问题
-
-- 影像上传：`MultipartFile.transferTo` 原先使用相对路径，写文件时被解析到 Tomcat 临时工作目录而必然失败；现改为绝对路径并可通过 `storage.images-dir` 配置。
-- 启动解译：前端原先硬编码 `image_path=/data/input.tif`，必然找不到文件；现在由后端按任务已上传影像自动解析，失败原因会回显到前端提示。
-- 业务接口无鉴权：原先只有前端路由守卫，未登录也能直接调用业务接口；已补服务端会话校验。
-- 结果导出解得失败：导出打包用的 `ObjectMapper` 未注册 Java 时间模块，序列化 `LocalDateTime` 直接 500；已改为注入 Spring 管理的 `ObjectMapper`。
-- 组件语言包：未设置 Element Plus locale，确认框显示的是 Cancel / OK；已显式使用 `zh-cn`。
-
-## 功能实现状态
-
-下面是逐项核对后的真实状态，避免再把写死的演示数据当成已实现功能。
-
-| 模块 | 状态 | 说明 |
-| --- | --- | --- |
-| 注册 / 登录 / 退出 / 个人资料 / 改密码 | 已实现 | BCrypt 加密 + 服务端 Session，接口层已强制鉴权 |
-| 航拍任务 | 已实现 | 创建、列表、详情、删除、启动异步解译 |
-| 影像数据 | 已实现 | 上传、列表、删除（含磁盘文件），可按任务查看 |
-| 智能解译 | 已实现 | 三个官方模型真实推理；权重与运行时状态取自推理服务 |
-| 结果中心 | 已实现 | 记录列表、算法/状态筛选、预览图、下载、删除 |
-| 成果导出 | 已实现 | 真实成果清单 + 单条/全部 ZIP 打包下载 |
-| 数据驾驶舱 | 已实现 | 指标、任务队列、趋势图、算法分布、引擎健康度均为真实数据 |
-| 智能指挥中心 | 已实现 | 服务状态、统计与最近活动均来自真实探测与数据库 |
-| 实时监测 | 已实现 | 天气、空气质量、风险评分来自 Open-Meteo 实时接口；态势点位：环境点为作业区中心，任务点位优先用任务自身录入的经纬度真实定位，未录入坐标的任务以虚线环标为“相对示意” |
-| 通知中心 | 已实现 | 顶栏角标与通知列表由真实状态合成（服务可达性、权重就绪、失败/成功解译、待解译任务、缺影像任务） |
-| 任务地理坐标 | 已实现 | `uav_task.latitude/longitude` + 新建任务表单坐标录入 + 态势图真实定位 |
-| 分页与搜索 | 已实现 | 任务/解译记录服务端分页（10/20/50 可选）、关键字与状态筛选；顶栏全局搜索纳入真实任务 |
-| 无人机遥测 | 未实现 | 没有真实遥测数据源，所以删掉了原先伪造的 UAV 点位，而不是继续展示假数据；需要接入设备上报接口才能真正实现 |
+See [VALIDATION.md](VALIDATION.md) for completed checks and remaining verification limits.

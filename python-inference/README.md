@@ -1,101 +1,31 @@
-# Python 推理服务
+# C2FNet 推理服务
 
-FastAPI 服务，负责运行三个遥感解译算法的**真实深度模型**（不再是仿真实现）。
+安装与启动见 [根目录 README](../README.md)。模型结构位于 camouflaged_object_detection/model，接入代码位于 detector.py；预处理与后处理按已验证的本地 C2FNet 实验对齐。
 
-## 目录结构
+## 配置
 
-```
-python-inference/
-├── main.py                          # FastAPI 入口：/inference/{algorithm}、/health、/algorithms
-├── common/
-│   ├── adapter.py                   # 仿真降级实现（真实推理不可用时的兜底）
-│   └── runtime.py                   # 设备选择、权重解析、影像读写、统一返回体
-├── camouflaged_object_detection/
-│   ├── detector.py                  # C2FNet 推理
-│   └── model/                       # C2FNet.py / Res2Net_v1b.py / tensor_ops.py（官方代码移植）
-├── change_detection/
-│   ├── detector.py                  # STFF-GA 推理（双时相输入）
-│   └── model/                       # network.py / backbones/resnet.py
-├── semantic_segmentation/
-│   ├── detector.py                  # ST-UNet 推理
-│   └── model/                       # vit_seg_modeling*.py / softpool.py（补齐缺失模块）
-└── weights/                         # 权重放置目录，见 weights/README.md
-```
+| 环境变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| RS_WEIGHTS_DIR | 服务目录下 weights | 完整权重目录 |
+| RS_RESULT_DIR | 服务目录下 results | TIFF、PNG 输出目录 |
+| RS_DEVICE | auto | auto / cpu / cuda，指定不可用的 CUDA 会失败 |
+| RS_THREADS | 4 | CPU 运算线程数，须为正整数 |
 
-## 启动
+默认路径按代码位置解析，不依赖启动终端的位置。完整 checkpoint 严格加载；无需 Res2Net 预训练文件。默认单进程缓存模型，请勿随意增加多个 worker 导致重复占用显存。
 
-```bash
-cd python-inference
-python -m pip install -r requirements.txt          # 国内可加 -i https://pypi.tuna.tsinghua.edu.cn/simple
-.venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
+每次预测返回灰度响应 TIFF 和 PNG，尺寸与原图相同。class_count=2 指背景/前景任务，并不表示输出只有两个灰度值。输出处理为 logits 插值后 sigmoid、逐图归一化，与本地实验一致。
+
+GET /algorithms 和 GET /health 首次调用会实际加载模型，首次访问可能较慢。模型加载失败会保留错误供诊断；修复依赖或设备配置后可重启服务或 POST /models/reload。
+
+## 测试
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-test.txt
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+$env:C2FNET_TEST_WEIGHTS = (Resolve-Path weights/c2fnet.pth).Path
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-## 接口
+不设置 C2FNET_TEST_WEIGHTS 时只运行轻量接口检查；设置后增加真实模型、重复输出和地理参考验证。测试图片在临时目录中创建。
 
-### `POST /inference/{algorithm}`
-
-```json
-{ "image_path": "/abs/path/a.png", "image_path_b": "/abs/path/b.png" }
-```
-
-- `algorithm` ∈ `camouflaged_object_detection` | `change_detection` | `semantic_segmentation`
-- `image_path_b` 仅变化检测需要（双时相影像）
-- 返回体在原有契约上扩展：
-
-```json
-{
-  "mask_path": "..._mask.tif",
-  "preview_path": "..._mask.png",
-  "width": 256, "height": 256, "class_count": 2,
-  "inference_time_ms": 581,
-  "created_at": "2026-10-12T12:58:37Z",
-  "simulated": false,
-  "model": "STFF-GA(ResNet18)",
-  "weights_loaded": false,
-  "device": "cpu",
-  "notes": "未找到权重文件，使用随机初始化权重，结果不具备判读意义"
-}
-```
-
-- `simulated=true` 表示已降级到仿真实现，`notes` 里带原因（例如未安装 torch）。
-- 原契约字段 `mask_path / width / height / class_count / inference_time_ms / created_at` 全部保留。
-- GeoTIFF 输入会保留坐标系与仿射变换写出结果 tif；同时输出 PNG 预览供前端展示。
-
-### 变化检测的双时相输入约定
-
-以下三种写法等价：
-
-1. 同时传 `image_path` 与 `image_path_b`；
-2. `image_path` 写成 `"a.tif|b.tif"` 或 `"a.tif,b.tif"`；
-3. `image_path` 指向一个目录，目录下含 `A/B`、`a/b`、`before/after`、`T1/T2` 子目录
-   （例如 WHU-CD-256 的 `test/A`、`test/B`）。
-
-### 其他
-
-- `GET /health`：服务状态、torch 是否可用、设备、权重目录。
-- `GET /algorithms`：三个算法对应的模型与权重是否就绪。
-
-## 算法与预处理
-
-| 算法 | 模型 | 输入尺寸 | 归一化 | 输出 |
-| --- | --- | --- | --- | --- |
-| 伪装目标检测 | C2FNet（Res2Net50） | 352×352 | ImageNet mean/std | 二值前景掩膜（255=目标） |
-| 变化检测 | STFF-GA（ResNet18） | 256×256 ×2 期 | mean=std=0.5 | 二值变化掩膜（255=变化） |
-| 语义分割 | ST-UNet（R50-ViT-B/16，n_skip=3） | 256×256 | 0–1（不标准化） | 0–5 类别掩膜，预览用 Vaihingen 配色 |
-
-输入尺寸与归一化参数对齐各官方仓库的测试脚本。结果都会缩放回原始影像尺寸后写出。
-
-## 移植说明（相对官方仓库的改动）
-
-- 只调整了导入路径（绝对导入 → 包内相对导入），使官方代码能作为子包复用，网络结构与计算逻辑未改动。
-- `C2FNet.__init__` 增加 `pretrained=False` 参数；`STFFGA.__init__` 增加 `backbone_pretrained` 参数，
-  用于控制是否联网下载 ImageNet 骨干权重（默认关闭）。
-- ST-UNet 官方压缩包缺失 `SoftPool.py`，按 SoftPool 论文等价定义补在
-  `semantic_segmentation/model/softpool.py`（窗口内 softmax 加权池化）。
-- ST-UNet 的 `vit_seg_modeling_resnet_skip.py` 增加了对 `timm.models.layers` 新版本路径的兼容导入。
-
-## 运行环境提示
-
-本机 `.venv` 曾因项目目录改名（`~/项目/遥感平台` → `~/xiangmu/遥感平台`）导致
-`.venv/bin/pip`、`uvicorn` 等脚本的 shebang 失效，已修为新路径；后续若再次移动目录，
-需要重新执行一次同样的替换，或直接重建虚拟环境。
+模型网络来自仓库原有的 C2FNet 移植，论文/原项目来源为 https://github.com/Ben57882/C2FNet-master 。本次接入没有改变网络结构。

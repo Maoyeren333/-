@@ -1,14 +1,12 @@
 name: CI
-
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, 'feat/**']
   pull_request:
   workflow_dispatch:
 
 jobs:
   backend:
-    name: 后端编译（Spring Boot）
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,12 +15,10 @@ jobs:
           distribution: temurin
           java-version: '17'
           cache: maven
-      - name: mvn compile
+      - run: mvn -B test
         working-directory: springboot-backend
-        run: mvn -B -DskipTests compile
 
   frontend:
-    name: 前端构建（Vue3 + Vite）
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,36 +27,21 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: vue-frontend/package-lock.json
-      - name: npm ci && build
+      - run: npm ci
         working-directory: vue-frontend
-        run: |
-          npm ci
-          npm run build
+      - run: npm run build
+        working-directory: vue-frontend
 
   inference:
-    name: 推理服务语法与降级检查
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
-      # 只装 Web 与影像依赖：CI 不安装 torch（体积大且这里只验证语法与降级路径）
-      - name: 安装轻量依赖
-        run: pip install fastapi==0.115.6 uvicorn==0.34.0 pydantic==2.13.4 numpy pillow
-      - name: 语法检查
+          python-version: '3.13'
+      # Real checkpoint is intentionally not stored in Git. CI covers service failures and file contracts.
+      - run: pip install 'fastapi>=0.115.6,<1' 'pydantic>=2.10,<3' 'httpx>=0.27,<1' numpy pillow rasterio
+      - run: python -m compileall -q camouflaged_object_detection common main.py scripts tests
         working-directory: python-inference
-        run: python -m compileall -q camouflaged_object_detection change_detection semantic_segmentation common main.py
-      - name: 无 torch 时应优雅降级为仿真实现
+      - run: python -m unittest discover -s tests -v
         working-directory: python-inference
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          from PIL import Image
-          Image.new('RGB', (64, 64), (120, 120, 120)).save('/tmp/ci_sample.png')
-          from camouflaged_object_detection.detector import run
-          out = run(Path('/tmp/ci_sample.png'))
-          assert out['simulated'] is True, out
-          assert 'mask_path' in out
-          print('降级路径正常：', out['notes'])
-          PY

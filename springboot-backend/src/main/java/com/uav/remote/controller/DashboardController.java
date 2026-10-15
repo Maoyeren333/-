@@ -18,7 +18,7 @@ import java.util.Map;
 @RequestMapping("/api/dashboard")
 public class DashboardController {
     private static final DateTimeFormatter DAY = DateTimeFormatter.ofPattern("MM/dd");
-    private static final List<String> ALGORITHMS = List.of("camouflaged_object_detection", "change_detection", "semantic_segmentation");
+    private static final List<String> ALGORITHMS = List.of("camouflaged_object_detection");
 
     private final TaskRepository tasks;
     private final InterpretationRepository interpretations;

@@ -5,7 +5,7 @@ import * as echarts from 'echarts'
 import { Plus, Operation } from '@element-plus/icons-vue'
 import { dashboardApi, taskApi, algorithmApi } from '../api/http'
 
-const ALGORITHM_LABEL = { camouflaged_object_detection: '伪装目标检测', change_detection: '变化检测', semantic_segmentation: '语义分割' }
+const ALGORITHM_LABEL = { camouflaged_object_detection: '伪装目标检测' }
 const trend = ref(), pie = ref()
 const today = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
 const onlineEngines = ref(0)
