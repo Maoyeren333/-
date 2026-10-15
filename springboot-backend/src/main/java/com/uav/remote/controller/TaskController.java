@@ -47,7 +47,7 @@ public class TaskController {
         return Map.of("status", "DELETED", "id", id);
     }
 
-    /** 启动解译。未提供 image_path 时自动使用该任务已上传的影像（变化检测需要两张）。 */
+    /** 启动解译。未提供 image_path 时自动使用该任务已上传的影像（默认第一张）。 */
     @PostMapping("/{id}/interpretations")
     public Map<String, Object> run(@PathVariable Long id, @RequestBody(required = false) Map<String, String> body) {
         Map<String, String> payload = body == null ? Map.of() : body;
@@ -55,14 +55,13 @@ public class TaskController {
         String algorithm = payload.get("algorithm");
         if (algorithm == null || algorithm.isBlank()) algorithm = task.getAlgorithm();
 
-        String[] inputs = service.resolveInputs(id, algorithm, payload.get("image_path"), payload.get("image_path_b"));
-        service.interpret(id, algorithm, inputs[0], inputs[1]);
+        String input = service.resolveInput(id, algorithm, payload.get("image_path"));
+        service.interpret(id, algorithm, input);
 
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("status", "SUBMITTED");
         response.put("algorithm", algorithm);
-        response.put("imagePath", inputs[0]);
-        response.put("imagePathB", inputs[1] == null ? "" : inputs[1]);
+        response.put("imagePath", input);
         return response;
     }
 }

@@ -1,29 +1,13 @@
 {
-  "note": "训练完成后把权重文件名、下载地址与 sha256 填到这里，配合 scripts/download_weights.sh 一键下载并校验。sha256 用 `shasum -a 256 文件` 生成；把权重传到 GitHub Release / ModelScope / 阿里云 OSS 后把直链填到 url。",
+  "note": "Validated user-provided C2FNet checkpoint. No public download has been configured.",
   "weights": [
     {
       "algorithm": "camouflaged_object_detection",
       "file": "c2fnet.pth",
       "url": "",
-      "sha256": "",
-      "size_bytes": 0,
-      "source": "官方 checkpoint 在 Google Drive（本机不可达，需手动下载后放入本目录）"
-    },
-    {
-      "algorithm": "change_detection",
-      "file": "stff_ga.pth",
-      "url": "",
-      "sha256": "",
-      "size_bytes": 0,
-      "source": "官方未发布权重，需用 WHU-CD-256 自行训练"
-    },
-    {
-      "algorithm": "semantic_segmentation",
-      "file": "st_unet.pth",
-      "url": "",
-      "sha256": "",
-      "size_bytes": 0,
-      "source": "官方未发布权重，需用 Vaihingen/Potsdam 自行训练；官方保存格式为 {\"model\": state_dict}"
+      "sha256": "e2d7bc1aea4bd64bf3a066ac9c69dd49937459ab16fbb29ee22885c8249d6df4",
+      "size_bytes": 114094760,
+      "source": "C2FNet40/C2FNet-39.pth (local validated checkpoint)"
     }
   ]
 }

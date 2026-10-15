@@ -20,8 +20,7 @@ import java.util.Map;
 
 @Service
 public class TaskService {
-    private static final List<String> ALGORITHMS = List.of("camouflaged_object_detection", "change_detection", "semantic_segmentation");
-    private static final String CHANGE_DETECTION = "change_detection";
+    private static final List<String> ALGORITHMS = List.of("camouflaged_object_detection");
 
     private final TaskRepository tasks;
     private final InterpretationRepository results;
@@ -90,32 +89,21 @@ public class TaskService {
         tasks.deleteById(taskId);
     }
 
-    /**
-     * 解析本次解译实际要用的影像路径。
-     *
-     * 优先使用请求显式传入的路径；未传时回退到该任务已上传的影像：
-     * 单期算法取第 1 张，变化检测取第 1、2 张作为双时相输入。
-     */
-    public String[] resolveInputs(Long taskId, String algorithm, String imagePath, String imagePathB) {
+    /** Resolve the single uploaded C2FNet input; reject retired algorithms synchronously. */
+    public String resolveInput(Long taskId, String algorithm, String imagePath) {
+        if (!ALGORITHMS.contains(algorithm)) throw new IllegalArgumentException("仅支持 C2FNet 伪装目标检测");
         String first = blankToNull(imagePath);
-        String second = blankToNull(imagePathB);
-        List<RemoteImage> uploaded = images(taskId);
-
-        if (first == null && !uploaded.isEmpty()) first = uploaded.get(0).getFilePath();
-        if (CHANGE_DETECTION.equals(algorithm)) {
-            if (second == null && uploaded.size() >= 2) second = uploaded.get(1).getFilePath();
-            if (first == null || second == null) {
-                throw new IllegalArgumentException("变化检测需要两期影像：请为该任务上传两张影像，或同时传入 image_path 与 image_path_b");
-            }
-        } else if (first == null) {
-            throw new IllegalArgumentException("该任务还没有影像：请先上传影像，或在请求中提供 image_path");
+        if (first == null) {
+            List<RemoteImage> uploaded = images(taskId);
+            if (!uploaded.isEmpty()) first = uploaded.get(0).getFilePath();
         }
-        return new String[]{first, second};
+        if (first == null) throw new IllegalArgumentException("该任务还没有影像，请先上传影像");
+        return first;
     }
 
     @Async
     @Transactional
-    public void interpret(Long taskId, String algorithm, String pathA, String pathB) {
+    public void interpret(Long taskId, String algorithm, String imagePath) {
         Task task = get(taskId);
         String resolvedAlgorithm = (algorithm == null || algorithm.isBlank()) ? task.getAlgorithm() : algorithm;
         if (resolvedAlgorithm == null || !ALGORITHMS.contains(resolvedAlgorithm)) throw new IllegalArgumentException("不支持的解译算法");
@@ -127,21 +115,24 @@ public class TaskService {
         Interpretation result = new Interpretation();
         result.setTaskId(taskId);
         result.setAlgorithm(resolvedAlgorithm);
-        result.setSourcePath(pathB == null || pathB.isBlank() ? pathA : pathA + "|" + pathB);
+        result.setSourcePath(imagePath);
         result.setStatus("RUNNING");
         result = results.save(result);
 
         try {
             Map<String, Object> body = new LinkedHashMap<>();
-            body.put("image_path", pathA);
-            if (pathB != null && !pathB.isBlank()) body.put("image_path_b", pathB);
+            body.put("image_path", imagePath);
             Map<String, Object> output = ai.infer(resolvedAlgorithm, body);
+            if (!Boolean.TRUE.equals(output.get("weights_loaded")) || !Boolean.FALSE.equals(output.get("simulated"))) {
+                throw new IllegalStateException("推理服务未返回已加载权重的真实结果");
+            }
             Object maskPath = output.get("mask_path");
-            if (maskPath == null) throw new IllegalStateException("推理服务未返回 mask_path");
+            if (maskPath == null || String.valueOf(maskPath).isBlank()) throw new IllegalStateException("推理服务未返回 mask_path");
             result.setMaskPath(String.valueOf(maskPath));
             result.setStatus("SUCCESS");
             task.setStatus("COMPLETED");
         } catch (Exception ex) {
+            org.slf4j.LoggerFactory.getLogger(TaskService.class).error("C2FNet inference failed for task {}", taskId, ex);
             result.setStatus("FAILED");
             task.setStatus("FAILED");
         }

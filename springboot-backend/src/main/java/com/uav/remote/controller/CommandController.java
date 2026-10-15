@@ -74,7 +74,7 @@ public class CommandController {
         long engineStarted = System.currentTimeMillis();
         try {
             Map<String, Object> health = inference.health();
-            boolean up = "UP".equals(String.valueOf(health.get("status")));
+            boolean up = "UP".equals(String.valueOf(health.get("status"))) || "DEGRADED".equals(String.valueOf(health.get("status")));
             engine.put("status", up ? "ONLINE" : "DOWN");
             engine.put("detail", "torch=" + health.get("torch_available") + " · device=" + health.get("device"));
         } catch (Exception ex) {
@@ -153,15 +153,15 @@ public class CommandController {
         List<Map<String, Object>> tips = new ArrayList<>();
 
         if (!"ONLINE".equals(engineStatus)) {
-            tips.add(tip(tips.size(), "启动推理服务", "在 python-inference 目录运行 .venv/bin/uvicorn main:app --port 8000，否则解译会直接失败"));
+            tips.add(tip(tips.size(), "启动推理服务", "在 python-inference 目录运行 python -m uvicorn main:app --port 8000，否则解译会直接失败"));
         } else if (weightsMissing) {
-            tips.add(tip(tips.size(), "放入模型权重", "把 c2fnet.pth / stff_ga.pth / st_unet.pth 放进 python-inference/weights，当前为随机初始化权重"));
+            tips.add(tip(tips.size(), "放入模型权重", "请将完整 c2fnet.pth 放入 python-inference/weights，并检查模型加载状态"));
         } else {
-            tips.add(tip(tips.size(), "模型已就绪", "三个算法都已加载权重，可直接批量解译"));
+            tips.add(tip(tips.size(), "模型已就绪", "C2FNet 已加载权重，可在任务页启动解译"));
         }
 
         if (tasksWithoutImage > 0) {
-            tips.add(tip(tips.size(), "先补影像", tasksWithoutImage + " 个任务还没有影像，变化检测需要上传两张"));
+            tips.add(tip(tips.size(), "先补影像", tasksWithoutImage + " 个任务还没有影像，请先上传一张影像"));
         } else if (pendingTasks > 0) {
             tips.add(tip(tips.size(), "启动待解译任务", pendingTasks + " 个任务处于排队或处理中，可在任务页点击开始解译"));
         } else if (failedResults > 0) {
@@ -212,8 +212,6 @@ public class CommandController {
         if (algorithm == null) return "未指定算法";
         return switch (algorithm) {
             case "camouflaged_object_detection" -> "伪装目标检测";
-            case "change_detection" -> "变化检测";
-            case "semantic_segmentation" -> "语义分割";
             default -> algorithm;
         };
     }

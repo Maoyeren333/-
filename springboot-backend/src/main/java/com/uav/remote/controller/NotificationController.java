@@ -19,7 +19,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
- * 通知中心：所有通知都由真实状态合成，不再有写死的“三个引擎均已在线”之类文案。
+ * 通知中心：所有通知都由真实状态合成，不再有写死的引擎在线文案。
  *
  * 来源：推理服务可达性、算法权重就绪情况、失败与成功的解译记录、待解译任务、缺少影像的任务。
  */
@@ -49,7 +49,7 @@ public class NotificationController {
         List<Map<String, Object>> algorithms = List.of();
         try {
             Map<String, Object> health = inference.health();
-            inferenceUp = "UP".equals(String.valueOf(health.get("status")));
+            inferenceUp = "UP".equals(String.valueOf(health.get("status"))) || "DEGRADED".equals(String.valueOf(health.get("status")));
             Object raw = inference.algorithms().get("algorithms");
             if (raw instanceof List<?> list) {
                 algorithms = list.stream()
@@ -67,7 +67,7 @@ public class NotificationController {
             long missing = algorithms.stream().filter(item -> !Boolean.TRUE.equals(item.get("weights_ready"))).count();
             if (missing > 0) {
                 items.add(notice("WARNING", "⚠", missing + " 个算法未加载权重",
-                        "当前以随机初始化权重推理，结果不具备判读意义；把权重放入 python-inference/weights 即可", null));
+                        "模型不可用时解译会失败；请检查 python-inference/weights 中的完整权重及服务日志", null));
             }
         }
 
