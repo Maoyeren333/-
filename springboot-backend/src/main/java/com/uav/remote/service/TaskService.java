@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 
@@ -89,32 +90,52 @@ public class TaskService {
         tasks.deleteById(taskId);
     }
 
-    /** Resolve the single uploaded C2FNet input; reject retired algorithms synchronously. */
-    public String resolveInput(Long taskId, String algorithm, String imagePath) {
+    /** Resolve selected task images, or all uploaded images when no selection is supplied. */
+    public List<String> resolveInputs(Long taskId, String algorithm, List<Long> imageIds, String imagePath) {
         if (!ALGORITHMS.contains(algorithm)) throw new IllegalArgumentException("仅支持 C2FNet 伪装目标检测");
-        String first = blankToNull(imagePath);
-        if (first == null) {
-            List<RemoteImage> uploaded = images(taskId);
-            if (!uploaded.isEmpty()) first = uploaded.get(0).getFilePath();
+        String explicitPath = blankToNull(imagePath);
+        if (explicitPath != null) {
+            if (imageIds != null) throw new IllegalArgumentException("图片路径与影像选择不能同时提供");
+            return List.of(explicitPath);
         }
-        if (first == null) throw new IllegalArgumentException("该任务还没有影像，请先上传影像");
-        return first;
+        List<RemoteImage> uploaded = images(taskId);
+        if (imageIds == null) {
+            if (uploaded.isEmpty()) throw new IllegalArgumentException("该任务还没有影像，请先上传影像");
+            return uploaded.stream().map(RemoteImage::getFilePath).toList();
+        }
+        if (imageIds.isEmpty()) throw new IllegalArgumentException("请至少选择一张影像");
+        Map<Long, String> paths = new LinkedHashMap<>();
+        for (RemoteImage image : uploaded) paths.put(image.getId(), image.getFilePath());
+        return new LinkedHashSet<>(imageIds).stream().map(id -> {
+            if (id == null || !paths.containsKey(id)) throw new IllegalArgumentException("所选影像不存在或不属于该任务");
+            return paths.get(id);
+        }).toList();
     }
 
     @Async
-    @Transactional
-    public void interpret(Long taskId, String algorithm, String imagePath) {
+    public void interpret(Long taskId, String algorithm, List<String> imagePaths) {
         Task task = get(taskId);
         String resolvedAlgorithm = (algorithm == null || algorithm.isBlank()) ? task.getAlgorithm() : algorithm;
         if (resolvedAlgorithm == null || !ALGORITHMS.contains(resolvedAlgorithm)) throw new IllegalArgumentException("不支持的解译算法");
+        if (imagePaths == null || imagePaths.isEmpty()) throw new IllegalArgumentException("请至少选择一张影像");
 
         task.setAlgorithm(resolvedAlgorithm);
         task.setStatus("PROCESSING");
         tasks.save(task);
 
+        boolean failed = false;
+        for (String imagePath : imagePaths) {
+            if (!interpretImage(taskId, resolvedAlgorithm, imagePath)) failed = true;
+        }
+        task.setStatus(failed ? "FAILED" : "COMPLETED");
+        tasks.save(task);
+    }
+
+    // Repository calls commit each image's status, so completed results are visible during a batch.
+    private boolean interpretImage(Long taskId, String algorithm, String imagePath) {
         Interpretation result = new Interpretation();
         result.setTaskId(taskId);
-        result.setAlgorithm(resolvedAlgorithm);
+        result.setAlgorithm(algorithm);
         result.setSourcePath(imagePath);
         result.setStatus("RUNNING");
         result = results.save(result);
@@ -122,7 +143,7 @@ public class TaskService {
         try {
             Map<String, Object> body = new LinkedHashMap<>();
             body.put("image_path", imagePath);
-            Map<String, Object> output = ai.infer(resolvedAlgorithm, body);
+            Map<String, Object> output = ai.infer(algorithm, body);
             if (!Boolean.TRUE.equals(output.get("weights_loaded")) || !Boolean.FALSE.equals(output.get("simulated"))) {
                 throw new IllegalStateException("推理服务未返回已加载权重的真实结果");
             }
@@ -130,14 +151,12 @@ public class TaskService {
             if (maskPath == null || String.valueOf(maskPath).isBlank()) throw new IllegalStateException("推理服务未返回 mask_path");
             result.setMaskPath(String.valueOf(maskPath));
             result.setStatus("SUCCESS");
-            task.setStatus("COMPLETED");
         } catch (Exception ex) {
             org.slf4j.LoggerFactory.getLogger(TaskService.class).error("C2FNet inference failed for task {}", taskId, ex);
             result.setStatus("FAILED");
-            task.setStatus("FAILED");
         }
         results.save(result);
-        tasks.save(task);
+        return "SUCCESS".equals(result.getStatus());
     }
 
     private String blankToNull(String value) { return value == null || value.isBlank() ? null : value.trim(); }

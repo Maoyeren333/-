@@ -12,6 +12,7 @@ import java.util.Map;
 @RequestMapping("/api/tasks")
 @CrossOrigin
 public class TaskController {
+    public record InterpretationRequest(String algorithm, List<Long> image_ids, String image_path) { }
     private final TaskService service;
 
     public TaskController(TaskService service) { this.service = service; }
@@ -47,21 +48,23 @@ public class TaskController {
         return Map.of("status", "DELETED", "id", id);
     }
 
-    /** 启动解译。未提供 image_path 时自动使用该任务已上传的影像（默认第一张）。 */
+    /** Each selected image produces a separate interpretation; defaults to all task images. */
     @PostMapping("/{id}/interpretations")
-    public Map<String, Object> run(@PathVariable Long id, @RequestBody(required = false) Map<String, String> body) {
-        Map<String, String> payload = body == null ? Map.of() : body;
+    public Map<String, Object> run(@PathVariable Long id, @RequestBody(required = false) InterpretationRequest body) {
+        InterpretationRequest payload = body == null ? new InterpretationRequest(null, null, null) : body;
         Task task = service.get(id);
-        String algorithm = payload.get("algorithm");
+        String algorithm = payload.algorithm();
         if (algorithm == null || algorithm.isBlank()) algorithm = task.getAlgorithm();
 
-        String input = service.resolveInput(id, algorithm, payload.get("image_path"));
-        service.interpret(id, algorithm, input);
+        List<String> inputs = service.resolveInputs(id, algorithm, payload.image_ids(), payload.image_path());
+        service.interpret(id, algorithm, inputs);
 
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("status", "SUBMITTED");
         response.put("algorithm", algorithm);
-        response.put("imagePath", input);
+        response.put("imagePath", inputs.get(0));
+        response.put("imagePaths", inputs);
+        response.put("imageCount", inputs.size());
         return response;
     }
 }

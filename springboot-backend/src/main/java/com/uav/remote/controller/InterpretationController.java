@@ -42,11 +42,12 @@ public class InterpretationController {
     @GetMapping("/page")
     public Map<String, Object> page(@RequestParam(defaultValue = "1") int page,
                                    @RequestParam(defaultValue = "10") int size,
+                                   @RequestParam(required = false) Long taskId,
                                    @RequestParam(required = false) String status,
                                    @RequestParam(required = false) String algorithm) {
         int safePage = Math.max(1, page);
         Pageable pageable = PageRequest.of(safePage - 1, Math.max(1, Math.min(size, 100)));
-        Page<Interpretation> result = repo.searchPaged(blankToNull(status), blankToNull(algorithm), pageable);
+        Page<Interpretation> result = repo.searchPaged(blankToNull(status), blankToNull(algorithm), taskId, pageable);
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("items", result.getContent());
         payload.put("total", result.getTotalElements());
