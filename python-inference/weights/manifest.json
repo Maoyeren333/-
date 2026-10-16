@@ -1,10 +1,10 @@
 {
-  "note": "Validated user-provided C2FNet checkpoint. No public download has been configured.",
+  "note": "Validated C2FNet checkpoint, published as a GitHub Release asset (repo is public, direct download needs no auth).",
   "weights": [
     {
       "algorithm": "camouflaged_object_detection",
       "file": "c2fnet.pth",
-      "url": "",
+      "url": "https://github.com/Maoyeren333/-/releases/download/c2fnet-weights-v1/c2fnet.pth",
       "sha256": "e2d7bc1aea4bd64bf3a066ac9c69dd49937459ab16fbb29ee22885c8249d6df4",
       "size_bytes": 114094760,
       "source": "C2FNet40/C2FNet-39.pth (local validated checkpoint)"
