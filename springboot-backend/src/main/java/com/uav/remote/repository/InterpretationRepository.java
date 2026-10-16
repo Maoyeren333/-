@@ -20,8 +20,10 @@ public interface InterpretationRepository extends JpaRepository<Interpretation, 
 
     void deleteByTaskId(Long taskId);
 
-    /** status/algorithm 为 null 时不过滤。 */
+    /** Optional task, status and algorithm filters are applied before pagination. */
     @Query("select r from Interpretation r where (:status is null or r.status = :status) "
-            + "and (:algorithm is null or r.algorithm = :algorithm) order by r.id desc")
-    Page<Interpretation> searchPaged(@Param("status") String status, @Param("algorithm") String algorithm, Pageable pageable);
+            + "and (:algorithm is null or r.algorithm = :algorithm) "
+            + "and (:taskId is null or r.taskId = :taskId) order by r.id desc")
+    Page<Interpretation> searchPaged(@Param("status") String status, @Param("algorithm") String algorithm,
+                                   @Param("taskId") Long taskId, Pageable pageable);
 }
